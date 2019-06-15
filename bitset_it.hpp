@@ -4,89 +4,134 @@
 
 #include <bitset>   // bitset
 #include <iterator> // iterator_traits
-#include <limits>   // numeric_limits
 
 #include <cassert>  // assert
+#include <climits>  // CHAR_BIT
 
-namespace util {
+namespace traits {
+    // Always fits in integer type
+    template < class T, class Int >
+    struct always_fits;
+
+    template < size_t N, class Int >
+    struct always_fits< std::bitset<N>,Int> : std::integral_constant<bool, N <= CHAR_BIT*sizeof(Int)>
+    {
+    };
+
+    template < class T >
+    struct best_fit_int;
+
+    template < size_t N >
+    struct best_fit_int< std::bitset<N> > {
+        static_assert( traits::always_fits<std::bitset<N>, unsigned long long>::value );
+
+        typedef typename std::conditional<
+                N < CHAR_BIT*sizeof(unsigned long),
+                unsigned long,
+                unsigned long long
+            >::type unsigned_type;
+
+        typedef typename std::conditional<
+                N < CHAR_BIT*sizeof(long),
+                long,
+                long long
+            >::type signed_type;
+    };
+}
+
+namespace detail {
+    // For values fitting in ulong
+    inline int lsb_set( unsigned long value ) {
+        assert( value > 0 ); // Assuming at least one bit is set
+        return __builtin_ffsl(value) -1;
+    }
+
+    // For values not fitting in ulong but in ulonglong instead
+    inline int lsb_set( unsigned long long value ) {
+        assert( value > 0 ); // Assuming at least one bit is set
+        return __builtin_ffsll(value) -1;
+    }
+
+    template < size_t N >
+    inline std::enable_if_t<N < CHAR_BIT*sizeof(unsigned long), unsigned long>
+    int_value( const std::bitset<N>& value ) {
+        return value.to_ulong();
+    }
+
+    template < size_t N >
+    inline std::enable_if_t<CHAR_BIT*sizeof(unsigned long) < N 
+                       && N < CHAR_BIT*sizeof(unsigned long long),
+                     unsigned long long>
+    int_value( const std::bitset<N>& value ) {
+        return value.to_ullong();
+    }
+}
+
+namespace iterators {
 
 template < size_t N >
-class bitset_iterator {
-        static_assert( N <= 8*sizeof(unsigned long long), "Unsupported bitset capacity" );
-    public:
+class bitset_it {
+public:
+    typedef typename traits::best_fit_int<std::bitset<N>>::unsigned_type value_type;
+    typedef typename traits::best_fit_int<std::bitset<N>>::signed_type   difference_type;
 
-        bitset_iterator() :
-            _value(0ULL)
-        {
-        }
+    constexpr bitset_it() noexcept = default;
 
-        explicit bitset_iterator( const std::bitset<N>& value ) :
-            _value(value.to_ullong())
-        {
-        }
+    constexpr bitset_it( const std::bitset<N>& init ) noexcept :
+        _remainder(detail::int_value(init))
+    {
+    }
 
-        bitset_iterator( const bitset_iterator& other ) :
-            _value(other._value)
-        {
-        }
+    constexpr bitset_it( const bitset_it& ) noexcept = default;
 
-        // Pre-increment
-        bitset_iterator& operator++() {
-            unset( lsb_set() );
-            return *this;
-        }
+    ~bitset_it() noexcept = default;
 
-        // Post-increment
-        bitset_iterator operator++(int) {
-            bitset_iterator it(*this);
-            ++(*this);
-            return it;
-        }
+    bitset_it& operator++() noexcept {
+        unset_lsb();
+        return *this;
+    }
 
-        unsigned operator*() const {
-            return lsb_set();
-        }
+    bitset_it operator++(int) noexcept {
+        bitset_it old(*this);
+        unset_lsb();
+        return old;
+    }
 
-        bool operator!= ( const bitset_iterator& other ) const {
-            return _value != other._value;
-        }
+    bool operator!=( const bitset_it& other ) const noexcept {
+        return _remainder != other._remainder;
+    }
 
-    private:
-        unsigned lsb_set() const {
-            assert( _value > 0 );
-            return __builtin_ffsll(_value) - 1;
-        }
+    value_type operator*() const noexcept {
+        return detail::lsb_set(_remainder);
+    }
 
-        void unset( unsigned position ) {
-            assert( position < std::numeric_limits<unsigned long long>::max() );
-            unsigned long long comp = 1ULL << position;
-            _value &= ~comp;
-        }
-
-        unsigned long long _value;
+private:
+    void unset_lsb() {
+        _remainder -= value_type(1)<<detail::lsb_set(_remainder);
+    }
+    
+    value_type _remainder;
 };
-
-} // namespace util
+        
+} // namespace iterators
 
 namespace std {
+    template < size_t N >
+    struct iterator_traits<bitset_it<N>> {
+        typedef typename bitset_it<N>::value_type      value_type;
+        typedef typename bitset_it<N>::difference_type difference_type;
+        typedef std::forward_iterator_tag              iterator_category;
+    };
 
-template < size_t N >
-struct iterator_traits< util::bitset_iterator<N> > {
-    typedef unsigned                  value_type;
-    typedef int                       difference_type;
-    typedef std::forward_iterator_tag iterator_category;
-};
+    template < size_t N >
+    bitset_it<N> begin( const std::bitset<N>& value ) noexcept {
+        return bitset_it<N>(value);
+    }
 
-template < size_t N >
-util::bitset_iterator<N> begin( const std::bitset<N>& bs ) {
-    return util::bitset_iterator<N>(bs);
+    template < size_t N >
+    bitset_it<N> end( const std::bitset<N>& ) noexcept {
+        return bitset_it<N>();
+    }
 }
-
-template < size_t N >
-util::bitset_iterator<N> end( const std::bitset<N>& /* unused */ ) {
-    return util::bitset_iterator<N>();
-}
-
-} // namespace std
 
 #endif // BITSET_IT_HPP
