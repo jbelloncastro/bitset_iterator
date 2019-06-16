@@ -107,7 +107,7 @@ public:
 
 private:
     void unset_lsb() {
-        _remainder -= value_type(1)<<detail::lsb_set(_remainder);
+        _remainder &= _remainder - 1;
     }
     
     value_type _remainder;
