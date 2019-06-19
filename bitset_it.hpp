@@ -1,41 +1,41 @@
-
 #ifndef BITSET_IT_HPP
 #define BITSET_IT_HPP
 
-#include <bitset>   // bitset
-#include <iterator> // iterator_traits
+#include <bitset>
+#include <iterator>
+#include <type_traits>
+
+#include <cstdint>
+#include <cstddef>
 
 #include <cassert>  // assert
-#include <climits>  // CHAR_BIT
+#include <climits>  // climits
 
-namespace traits {
-    // Always fits in integer type
-    template < class T, class Int >
-    struct always_fits;
+namespace iterators {
 
-    template < size_t N, class Int >
-    struct always_fits< std::bitset<N>,Int> : std::integral_constant<bool, N <= CHAR_BIT*sizeof(Int)>
-    {
-    };
+template < size_t N >
+class bitset_it;
 
-    template < class T >
-    struct best_fit_int;
+}
 
+namespace std {
     template < size_t N >
-    struct best_fit_int< std::bitset<N> > {
-        static_assert( traits::always_fits<std::bitset<N>, unsigned long long>::value );
+    struct iterator_traits<iterators::bitset_it<N>> {
+        static_assert( N<= 64, "Unsupported bitset size" );
 
-        typedef typename std::conditional<
-                N < CHAR_BIT*sizeof(unsigned long),
-                unsigned long,
-                unsigned long long
-            >::type unsigned_type;
+        using value_type =
+            conditional_t< N<= 8,  std::uint_fast8_t,
+            conditional_t< N<=16, std::uint_fast16_t,
+            conditional_t< N<=32, std::uint_fast32_t,
+                                  std::uint_fast64_t>>>;
 
-        typedef typename std::conditional<
-                N < CHAR_BIT*sizeof(long),
-                long,
-                long long
-            >::type signed_type;
+        using difference_type =
+            conditional_t< N<= 8,  std::uint_fast8_t,
+            conditional_t< N<=16, std::uint_fast16_t,
+            conditional_t< N<=32, std::uint_fast32_t,
+                                  std::uint_fast64_t>>>;
+
+        using iterator_category = std::forward_iterator_tag;
     };
 }
 
@@ -53,15 +53,13 @@ namespace detail {
     }
 
     template < size_t N >
-    inline std::enable_if_t<N < CHAR_BIT*sizeof(unsigned long), unsigned long>
+    inline std::enable_if_t<N<=CHAR_BIT*sizeof(unsigned long),unsigned long>
     int_value( const std::bitset<N>& value ) {
         return value.to_ulong();
     }
 
     template < size_t N >
-    inline std::enable_if_t<CHAR_BIT*sizeof(unsigned long) < N 
-                       && N < CHAR_BIT*sizeof(unsigned long long),
-                     unsigned long long>
+    inline std::enable_if_t<(N> CHAR_BIT*sizeof(unsigned long)),unsigned long>
     int_value( const std::bitset<N>& value ) {
         return value.to_ullong();
     }
@@ -72,8 +70,7 @@ namespace iterators {
 template < size_t N >
 class bitset_it {
 public:
-    typedef typename traits::best_fit_int<std::bitset<N>>::unsigned_type value_type;
-    typedef typename traits::best_fit_int<std::bitset<N>>::signed_type   difference_type;
+    using value_type = typename std::iterator_traits<bitset_it>::value_type;
 
     constexpr bitset_it() noexcept = default;
 
@@ -117,20 +114,13 @@ private:
 
 namespace std {
     template < size_t N >
-    struct iterator_traits<bitset_it<N>> {
-        typedef typename bitset_it<N>::value_type      value_type;
-        typedef typename bitset_it<N>::difference_type difference_type;
-        typedef std::forward_iterator_tag              iterator_category;
-    };
-
-    template < size_t N >
-    bitset_it<N> begin( const std::bitset<N>& value ) noexcept {
-        return bitset_it<N>(value);
+    iterators::bitset_it<N> begin( const std::bitset<N>& value ) noexcept {
+        return iterators::bitset_it<N>(value);
     }
 
     template < size_t N >
-    bitset_it<N> end( const std::bitset<N>& ) noexcept {
-        return bitset_it<N>();
+    iterators::bitset_it<N> end( const std::bitset<N>& ) noexcept {
+        return iterators::bitset_it<N>();
     }
 }
 
